@@ -13,8 +13,12 @@ from copy import deepcopy
 import argparse
 import urllib.request
 import codecs
+from yaml import safe_load
 import json
 import conda_build.api
+
+DEFAULT_MINIMUM_NUMPY_VERSION = '1.11'
+
 
 class meta(object):
     '''Holds metadata for a recipe obtained from the recipe's meta.yaml file,
@@ -25,40 +29,34 @@ class meta(object):
         self.recipe_dirname = os.path.basename(recipe_dir)
         self.versions = versions
         self.dirty = dirty
-        self.metaobj = None    # renderdata[0] (MetaData)
-        self.mdata = None      # renderdata[0].meta (dict)
-
+        self.metaobj = None     # renderdata[0] (MetaData)
+        self.mdata = None       # renderdata[0].meta (dict)
+        self.active = True  # Visit metadata in certain processing steps?
         self.valid = False
         self.complete = False
         self.name = None
-
         self.num_bdeps = 0
         self.deps = []
-
         self.peer_bdeps = []
-
         self.import_metadata(recipe_dir)
         self.derive_values()
-
         self.canonical_name = ''
-        self.archived = False # Whether or not the package with this metadata
-                              # already exists in the channel archive
-
+        # Whether or not the package with this metadata
+        # already exists in the channel archive
+        self.archived = False
         self.gen_canonical()
-
-        # self.unite_deps() # Test if needed.
 
     def import_metadata(self, rdir):
         '''Read in the package metadata from the given recipe directory via
         the conda recipe renderer to perform string interpolation and
         store the values in a dictionary.'''
         if os.path.isfile(rdir + '/meta.yaml'):
-            #print('      >>>>>>>> Importing metadata from {0}...'.format(self.recipe_dirname))
             # render() returns a tuple: (MetaData, bool, bool)
-            self.metaobj = conda_build.api.render(rdir,
-                            self.dirty,
-                            python=self.versions['python'],
-                            numpy=self.versions['numpy'])[0]
+            self.metaobj = conda_build.api.render(
+                rdir,
+                dirty=self.dirty,
+                python=self.versions['python'],
+                numpy=self.versions['numpy'])[0]
             self.mdata = self.metaobj.meta
             self.valid = self.is_valid()
             self.complete = self.is_complete()
@@ -73,15 +71,6 @@ class meta(object):
             self.num_bdeps = len(self.mdata['requirements']['build'])
             for req in self.mdata['requirements']['build']:
                 self.deps.append(req.split()[0])
-
-    def unite_deps(self):
-        '''Store the union of the simple names (no version specifications) of
-        build and run dependencies in .deps.'''
-        if self.complete:
-            for key in ['build', 'run']:
-                for req in self.mdata['requirements'][key]:
-                    self.deps.append(req.split()[0])
-            self.deps = set(self.deps)
 
     def deplist(self, deptype):
         '''Return the simplified (no version info, if present) list of
@@ -130,29 +119,34 @@ class metaSet(object):
     def __init__(self,
                  directory,
                  versions,
-                 channel,
+                 platform,
+                 manfile=None,
                  dirty=False):
         '''Parameters:
         directory - a relative or absolute directory in which Conda
           recipe subdirectories may be found.
         versions - Dictionary containing python, numpy, etc, version
           information.'''
-        self.versions = versions
-        self.dirty = dirty
         self.metas = []
+        self.platform = platform
+        self.versions = versions
+        self.manfile = manfile
+        self.manifest = None
+        if self.manfile:
+            self.read_manifest()
+            self.filter_by_manifest()
+        self.dirty = dirty
         self.incomplete_metas = []
         self.names = []
         self.read_recipes(directory)
         self.derive_values()
         self.sort_by_peer_bdeps()
         self.merge_metas()
-        self.channel = channel
-        if channel:
-            self.channel_URL = channel.strip('/')
+        if self.channel:
             self.channel_data = self.get_channel_data()
             self.flag_archived()
 
-    def read_recipes(self, directory):
+    def read_recipes_old(self, directory):
         '''Process a directory reading in each conda recipe found, creating
         a list of metadata objects for use in analyzing the collection of
         recipes as a whole.'''
@@ -168,10 +162,55 @@ class metaSet(object):
             else:
                 self.incomplete_metas.append(m)
 
+    def read_recipe_selection(self, directory, recipe_list):
+        '''Process a directory reading in each conda recipe found, creating
+        a list of metadata objects for use in analyzing the collection of
+        recipes as a whole.'''
+        for rdirname in recipe_list:
+            if rdirname in self.ignore_dirs:
+                continue
+            rdir = directory + '/' + rdirname
+            m = meta(rdir, versions=self.versions, dirty=self.dirty)
+            if m.complete:
+                self.metas.append(m)
+                self.names.append(m.name)
+            else:
+                self.incomplete_metas.append(m)
+
+    def read_recipes(self, directory):
+        recipe_dirnames = os.listdir(directory)
+        # If a manifest was given, use it to filter the list of available
+        # recipes.
+        if self.manifest:
+            recipe_list = set.intersection(
+                set(recipe_dirnames),
+                set(self.manifest['packages']))
+        else:
+            recipe_list = recipe_dirnames
+        self.read_recipe_selection(directory, recipe_list)
+
+    def read_manifest(self):
+        mf = open(self.manfile, 'r')
+        self.manifest = safe_load(mf)
+        self.channel = (self.manifest['channel_URL'].strip('/'))
+        ('/' + self.platform)
+        self.versions['numpy'] = str(self.manifest['numpy_version'])
+
+    def filter_by_manifest(self):
+        '''Leave only the recipe metadata entries that appear in the
+        provided manifest list active.'''
+        for meta in self.metas:
+            if meta.name not in self.manifest['packages']:
+                meta.active = False
+
     def merge_metas(self):
         '''Prepend the list of metas that do not have complete build
         dependency information to the main list.
         Also, add those names to the names list.'''
+        # Sort alphabetically by name
+        self.incomplete_metas = sorted(
+            self.incomplete_metas,
+            key=lambda meta: meta.name)
         for m in self.incomplete_metas[::-1]:
             self.metas.insert(0, m)
 
@@ -191,7 +230,13 @@ class metaSet(object):
     def sort_by_peer_bdeps(self):
         '''Sort the list of metadata objects by the number of peer build
         dependencies each has, in ascending order. This gives a good first
-        approximation to a correct build order of all peers.'''
+        approximation to a correct build order of all peers.  Peform an
+        extra step here to reduce stochasticity of the order of packages
+        within a given tier that all share the same number of peer_bdeps.
+        The order of those items apparently varies from run to run.'''
+        # First sort by alphabetical on name to make the subsequent
+        # sorting deterministic.
+        self.metas = sorted(self.metas, key=lambda meta: meta.name)
         self.metas = sorted(self.metas, key=lambda meta: len(meta.peer_bdeps))
 
     def index(self, mname):
@@ -272,7 +317,7 @@ class metaSet(object):
     def get_channel_data(self):
         '''Download the channel metadata from all specified conda package
         channel URLs, parse the JSON data into a dictionary.'''
-        jsonbytes = urllib.request.urlopen(self.channel_URL + '/repodata.json')
+        jsonbytes = urllib.request.urlopen(self.channel + '/repodata.json')
         # urllib only returns 'bytes' objects, so convert to unicode.
         reader = codecs.getreader('utf-8')
         return json.load(reader(jsonbytes))
@@ -289,10 +334,15 @@ class metaSet(object):
 
     def print_details(self, fh=sys.stdout):
         num_notOK = 0
+        print('Python version specified: ', self.versions['python'])
+        print('Numpy  version specified: ', self.versions['numpy'])
         print('                              num  num      peer', file=fh)
-        print('         name               bdeps  peer     bdep     pos.', file=fh)
-        print('                                   bdeps    indices  OK?', file=fh)
-        print('----------------------------------------------------------', file=fh)
+        print('         name               bdeps  peer     bdep     pos.',
+              file=fh)
+        print('                                   bdeps    indices  OK?',
+              file=fh)
+        print('----------------------------------------------------------',
+              file=fh)
         for idx, m in enumerate(self.metas):
             if not self.position_OK(m.name):
                 num_notOK = num_notOK + 1
@@ -304,7 +354,8 @@ class metaSet(object):
                           self.peer_bdep_indices(m.name),
                           self.position_OK(m.name),
                           wid=2), file=fh)
-        print('Num not in order = {0}/{1}\n'.format(num_notOK,
+        print('Num not in order = {0}/{1}\n'.format(
+            num_notOK,
             len(self.metas)), file=fh)
 
     def print(self, fh=sys.stdout):
@@ -315,12 +366,11 @@ class metaSet(object):
             print('{0}'.format(m.name), file=fh)
 
     def print_culled(self, fh=sys.stdout):
-        '''Prints the list of package names for which the canonical name does not
-        exist in the specified archive channel. List is presented in the order in
-        which entries appear in self.metas.'''
-        for m in self.metas:
-            if not m.archived:
-                print('{0}'.format(m.name), file=fh)
+        '''Prints the list of package names for which the canonical name does
+        not exist in the specified archive channel. List is presented in the
+        order in which entries appear in self.metas.'''
+        for m in [m for m in self.metas if m.active and not m.archived]:
+            print('{0}'.format(m.name), file=fh)
 
     def print_canonical(self, fh=sys.stdout):
         '''Prints list of canonical package names.'''
@@ -332,7 +382,8 @@ class metaSet(object):
         has already been built and archived in the specified channel.'''
         statstr = {True: '', False: 'Not in channel archive'}
         for meta in self.metas:
-            print('{0:>50}   {1}'.format(meta.canonical_name,
+            print('{0:>50}   {1}'.format(
+                meta.canonical_name,
                 statstr[meta.archived]), file=fh)
 
 
@@ -342,29 +393,42 @@ class metaSet(object):
 def main(argv):
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-c', '--culled', action='store_true',
-            help='Print the ordered list of package names reduced to the set'
-            ' of packages that do not already exist in the specified channel.'
-            ' Requires --channel')
-    parser.add_argument('-d', '--details', action='store_true',
-            help='Display details used in determining build order and/or '
-            'package culling.')
-    parser.add_argument('-f', '--file',
-            help='Send package list output to this file instead of stdout.')
-    parser.add_argument('--channel', type=str,
-            help='URL of conda channel repository to search for package list '
-            'culling purposes.')
-    parser.add_argument('--python', type=str,
+    parser.add_argument('-p', '--platform', type=str)
+    parser.add_argument(
+            '--python',
+            type=str,
             help='Python version to pass to conda machinery when rendering '
             'recipes. "#.#" format.')
-    parser.add_argument('--numpy', type=str,
-            help='Numpy version to pass to conda machinery when rendering '
-            'recipes. "#.#" format.')
-    parser.add_argument('--dirty', type=str,
+    parser.add_argument(
+            '-m',
+            '--manifest',
+            type=str,
+            help='Use this file to filter the list of recipes to process.')
+    parser.add_argument(
+            '-f',
+            '--file',
+            type=str,
+            help='Send package list output to this file instead of stdout.')
+    parser.add_argument(
+            '-c',
+            '--culled',
+            action='store_true',
+            help='Print the ordered list of package names reduced to the set'
+            ' of packages that do not already exist in the channel specified'
+            ' in the supplied manifest file.')
+    parser.add_argument(
+            '-d',
+            '--details',
+            action='store_true',
+            help='Display details used in determining build order and/or '
+            'package culling.')
+    parser.add_argument(
+            '--dirty',
+            action='store_true',
             help='Use the most recent pre-existing conda work directory for '
             'each recipe instead of creating a new one. If a work directory '
             'does not already exist, the recipe is processed in the normal '
-            'fashion.')
+            'fashion. Used mostly for testing purposes.')
     parser.add_argument('recipes_dir', type=str)
     args = parser.parse_args()
 
@@ -374,18 +438,18 @@ def main(argv):
     if args.file:
         fh = open(args.file, 'w')
 
-    versions = {'python':'',
-                'numpy':''}
+    versions = {'python': '', 'numpy': ''}
     if args.python:
         versions['python'] = args.python
-    if args.numpy:
-        versions['numpy'] = args.numpy
+
+    versions['numpy'] = DEFAULT_MINIMUM_NUMPY_VERSION
 
     mset = metaSet(
             recipes_dir,
+            platform=args.platform,
             versions=versions,
-            channel=args.channel,
-            dirty=args.dirty)
+            dirty=args.dirty,
+            manfile=args.manifest)
 
     mset.multipass_optimize()
 
