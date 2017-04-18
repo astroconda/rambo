@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
 '''
 RAMBO - Recipe Analyzer and Multi-package Build Optimizer
@@ -6,12 +6,13 @@ RAMBO - Recipe Analyzer and Multi-package Build Optimizer
 Requires conda to be installed on the PATH in order to access the API
 machinery via 'conda_build.api.
 '''
-
+from __future__ import print_function
 import os
 import sys
 from copy import deepcopy
 import argparse
-import urllib.request
+#import urllib.request
+from six.moves import urllib
 import codecs
 from yaml import safe_load
 import json
