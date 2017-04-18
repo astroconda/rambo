@@ -192,8 +192,8 @@ class metaSet(object):
     def read_manifest(self):
         mf = open(self.manfile, 'r')
         self.manifest = safe_load(mf)
-        self.channel = (self.manifest['channel_URL'].strip('/'))
-        ('/' + self.platform)
+        self.channel = self.manifest['channel_URL'].strip('/')
+        self.channel += '/' + self.platform
         self.versions['numpy'] = str(self.manifest['numpy_version'])
 
     def filter_by_manifest(self):
