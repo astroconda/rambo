@@ -11,7 +11,6 @@ import os
 import sys
 from copy import deepcopy
 import argparse
-#import urllib.request
 from six.moves import urllib
 import codecs
 from yaml import safe_load
