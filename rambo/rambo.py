@@ -3,9 +3,11 @@
 '''
 RAMBO - Recipe Analyzer and Multi-package Build Optimizer
 
-Requires conda to be installed on the PATH in order to access the API
-machinery via 'conda_build.api.
+Requires conda & conda-build to be installed in a path that appears in the
+python interprer's search list in order to access the API machinery via
+'conda_build.api.
 '''
+
 from __future__ import print_function
 import os
 import sys
@@ -15,7 +17,17 @@ from six.moves import urllib
 import codecs
 from yaml import safe_load
 import json
-import conda_build.api
+from rambo._version import __version__
+try:
+    import conda_build.api
+except ImportError:
+    raise ImportError('conda-build must be installed order to use this \n'
+                      'tool. Either conda-build is not installed, or you \n'
+                      'are working in an activated conda environment. \n'
+                      'If conda-build is installed deactivate the \n'
+                      'environment currently enabled or explicitly switch \n'
+                      'to the conda "root" environment to allow use of\n'
+                      'conda-build.')
 
 DEFAULT_MINIMUM_NUMPY_VERSION = '1.11'
 
@@ -334,6 +346,7 @@ class metaSet(object):
 
     def print_details(self, fh=sys.stdout):
         num_notOK = 0
+        print('conda-build version     : ', conda_build.__version__)
         print('Python version specified: ', self.versions['python'])
         print('Numpy  version specified: ', self.versions['numpy'])
         print('                              num  num      peer', file=fh)
@@ -390,15 +403,19 @@ class metaSet(object):
 # ----
 
 
-def main(argv):
+def main(argv=None):
 
-    parser = argparse.ArgumentParser()
+    if argv is None:
+        argv = sys.argv
+
+    parser = argparse.ArgumentParser(prog='rambo')
     parser.add_argument('-p', '--platform', type=str)
     parser.add_argument(
             '--python',
             type=str,
             help='Python version to pass to conda machinery when rendering '
-            'recipes. "#.#" format.')
+            'recipes. "#.#" format. If not specified, the version of python'
+            ' hosting conda_build.api is used.')
     parser.add_argument(
             '-m',
             '--manifest',
@@ -429,8 +446,18 @@ def main(argv):
             'each recipe instead of creating a new one. If a work directory '
             'does not already exist, the recipe is processed in the normal '
             'fashion. Used mostly for testing purposes.')
+    parser.add_argument(
+            '-v',
+            '--version',
+            action='version',
+            version='%(prog)s ' + __version__,
+            help='Display version information.')
     parser.add_argument('recipes_dir', type=str)
     args = parser.parse_args()
+
+    if args.version:
+        print(__version__)
+        os.exit(0)
 
     recipes_dir = os.path.normpath(args.recipes_dir)
 
@@ -463,4 +490,4 @@ def main(argv):
         mset.print(fh)
 
 if __name__ == "__main__":
-    main(sys.argv)
+    main()
