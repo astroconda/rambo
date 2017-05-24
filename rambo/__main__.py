@@ -4,6 +4,7 @@
 RAMBO - Recipe Analyzer and Multi-package Build Optimizer
 '''
 
+from __future__ import print_function
 import os
 import sys
 import argparse
