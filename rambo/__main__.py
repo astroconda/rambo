@@ -9,15 +9,16 @@ import os
 import sys
 import argparse
 from . import rambo
-#from ._version import __version__
-#from .rambo import *
+
 
 def main(argv=None):
 
     if argv is None:
         argv = sys.argv
 
-    parser = argparse.ArgumentParser(prog='rambo')
+    parser = argparse.ArgumentParser(
+            prog='rambo',
+            description='Recipe Analyzer and Multi-Package Build Optimizer')
     parser.add_argument('-p', '--platform', type=str)
     parser.add_argument(
             '--python',

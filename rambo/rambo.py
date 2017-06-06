@@ -19,13 +19,12 @@ from ._version import __version__
 try:
     import conda_build.api
 except ImportError:
-    raise ImportError('conda-build must be installed order to use this \n'
-                      'tool. Either conda-build is not installed, or you \n'
-                      'are working in an activated conda environment. \n'
-                      'If conda-build is installed deactivate the \n'
-                      'environment currently enabled or explicitly switch \n'
-                      'to the conda "root" environment to allow use of\n'
-                      'conda-build.')
+    print('conda-build must be installed order to use this tool. \n'
+          'Either conda-build is not installed, or you are working in an \n'
+          'activated conda environment. \n'
+          'If conda-build is installed deactivate the environment currently \n'
+          'enabled or explicitly switch to the conda "root" environment to \n'
+          'allow use of conda-build.')
 
 DEFAULT_MINIMUM_NUMPY_VERSION = '1.11'
 

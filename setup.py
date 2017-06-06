@@ -22,7 +22,5 @@ setup(
     ],
     packages=find_packages(),
     package_data={'': ['README.md', 'LICENSE.txt']},
-    entry_points = {
-        'console_scripts': ['rambo=rambo.__main__:main'],
-    }
+    entry_points={'console_scripts': ['rambo=rambo.__main__:main'], }
 )
