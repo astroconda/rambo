@@ -9,4 +9,8 @@ Performs a few useful functions upon a collection of Conda build recipes:
 - Cull the collection of sorted recipes by removing ones that would generate package file names
   already existing in a given distribution channel.
 
-`rambo.py -h` for usage information
+Installation:
+`python setup.py install`
+
+Usage information:
+`rambo -h`
