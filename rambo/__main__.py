@@ -8,7 +8,7 @@ from __future__ import print_function
 import os
 import sys
 import argparse
-from . import rambo
+from . import meta
 
 
 def main(argv=None):
@@ -60,7 +60,7 @@ def main(argv=None):
             '-v',
             '--version',
             action='version',
-            version='%(prog)s ' + rambo.__version__,
+            version='%(prog)s ' + meta.__version__,
             help='Display version information.')
     parser.add_argument('recipes_dir', type=str)
     args = parser.parse_args()
@@ -75,9 +75,9 @@ def main(argv=None):
     if args.python:
         versions['python'] = args.python
 
-    versions['numpy'] = rambo.DEFAULT_MINIMUM_NUMPY_VERSION
+    versions['numpy'] = meta.DEFAULT_MINIMUM_NUMPY_VERSION
 
-    mset = rambo.MetaSet(
+    mset = meta.MetaSet(
             recipes_dir,
             platform=args.platform,
             versions=versions,
