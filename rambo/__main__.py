@@ -77,9 +77,10 @@ def main(argv=None):
 
     versions['numpy'] = meta.DEFAULT_MINIMUM_NUMPY_VERSION
 
+    meta.Config.platform = args.platform
+
     mset = meta.MetaSet(
             recipes_dir,
-            platform=args.platform,
             versions=versions,
             dirty=args.dirty,
             manfile=args.manifest)
