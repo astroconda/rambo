@@ -18,7 +18,6 @@ import json
 from ._version import __version__
 try:
     import conda_build.api
-    from conda_build.config import Config
 except ImportError:
     print('conda-build must be installed order to use this tool. \n'
           'Either conda-build is not installed, or you are working in an \n'
@@ -72,9 +71,6 @@ class Meta(object):
             self.complete = self.is_complete()
             if self.valid:
                 self.name = self.mdata['package']['name']
-            if self.metaobj.skip():
-                print('skipping on selected platform due to directive: {}'.format(
-                    self.name))
         else:
             print('Recipe directory {0} has no meta.yaml file.'.format(
                 self.recipe_dirname))
@@ -132,6 +128,7 @@ class MetaSet(object):
     def __init__(self,
                  directory,
                  versions,
+                 platform,
                  manfile=None,
                  dirty=False):
         '''Parameters:
@@ -140,7 +137,7 @@ class MetaSet(object):
         versions - Dictionary containing python, numpy, etc, version
           information.'''
         self.metas = []
-        self.platform = Config.platform
+        self.platform = platform
         self.versions = versions
         self.manfile = manfile
         self.manifest = None
@@ -168,12 +165,11 @@ class MetaSet(object):
                 continue
             rdir = directory + '/' + rdirname
             m = Meta(rdir, versions=self.versions, dirty=self.dirty)
-            if not m.metaobj.skip():
-                if m.complete:
-                    self.metas.append(m)
-                    self.names.append(m.name)
-                else:
-                    self.incomplete_metas.append(m)
+            if m.complete:
+                self.metas.append(m)
+                self.names.append(m.name)
+            else:
+                self.incomplete_metas.append(m)
 
     def read_recipes(self, directory):
         recipe_dirnames = os.listdir(directory)
