@@ -10,6 +10,17 @@ import sys
 import argparse
 from . import meta
 
+def get_platform():
+    plat_alias = sys.platform
+    if plat_alias == 'darwin':
+        plat_alias = 'osx'
+    is64bit = (sys.maxsize > 2**32)
+    arch_bits = '64'
+    if not is64bit:
+        arch_bits = '32'
+    platform = '{}-{}'.format(plat_alias, arch_bits)
+    return platform
+
 
 def main(argv=None):
 
@@ -19,7 +30,12 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
             prog='rambo',
             description='Recipe Analyzer and Multi-Package Build Optimizer')
-    parser.add_argument('-p', '--platform', type=str)
+    parser.add_argument('-p',
+            '--platform',
+            type=str,
+            help='The platform specification string in the format that conda'
+            ' understands. I.e. "linux-64" or "osx-64". If not specified, the'
+            ' platform of the host system is used.')
     parser.add_argument(
             '--python',
             type=str,
@@ -62,7 +78,7 @@ def main(argv=None):
             action='version',
             version='%(prog)s ' + meta.__version__,
             help='Display version information.')
-    parser.add_argument('recipes_dir', type=str)
+    parser.add_argument('recipes_dir', type=str, help='Required')
     args = parser.parse_args()
 
     recipes_dir = os.path.normpath(args.recipes_dir)
@@ -77,7 +93,10 @@ def main(argv=None):
 
     versions['numpy'] = meta.DEFAULT_MINIMUM_NUMPY_VERSION
 
-    meta.Config.platform = args.platform
+    if args.platform:
+        meta.Config.platform = args.platform
+    else:
+        meta.Config.platform = get_platform()
 
     mset = meta.MetaSet(
             recipes_dir,
