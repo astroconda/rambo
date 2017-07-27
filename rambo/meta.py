@@ -18,9 +18,9 @@ import json
 from ._version import __version__
 try:
     import conda_build.api
-    from conda_build.config import Config
+    from conda_build.api import Config
 except ImportError:
-    print('conda-build must be installed order to use this tool. \n'
+    print('conda-build must be installed in order to use this tool. \n'
           'Either conda-build is not installed, or you are working in an \n'
           'activated conda environment. \n'
           'If conda-build is installed deactivate the environment currently \n'
@@ -28,7 +28,7 @@ except ImportError:
           'allow use of conda-build.')
 
 DEFAULT_MINIMUM_NUMPY_VERSION = '1.11'
-
+CONDA_BUILD_MAJOR_VERSION = conda_build.__version__[0]
 
 class Meta(object):
     '''Holds metadata for a recipe obtained from the recipe's meta.yaml file,
@@ -61,12 +61,19 @@ class Meta(object):
         the conda recipe renderer to perform string interpolation and
         store the values in a dictionary.'''
         if os.path.isfile(rdir + '/meta.yaml'):
-            # render() returns a tuple: (MetaData, bool, bool)
-            self.metaobj = conda_build.api.render(
+            self.render_payload = conda_build.api.render(
                 rdir,
                 dirty=self.dirty,
                 python=self.versions['python'],
-                numpy=self.versions['numpy'])[0]
+                numpy=self.versions['numpy'])
+            if CONDA_BUILD_MAJOR_VERSION == '2':
+                # conda-build v2.x render() returns a tuple:
+                #  (MetaData, bool, bool)
+                self.metaobj = self.render_payload[0]
+            if CONDA_BUILD_MAJOR_VERSION == '3':
+                # conda-build v3.x render() return a list of tuples:
+                #  [(MetaData, bool, bool)]
+                self.metaobj = self.render_payload[0][0]
             self.mdata = self.metaobj.meta
             self.valid = self.is_valid()
             self.complete = self.is_complete()
@@ -115,11 +122,17 @@ class Meta(object):
     def gen_canonical(self):
         '''Generate the package's canonical name using available
         information.'''
-        self.canonical_name = os.path.basename(
-                conda_build.api.get_output_file_path(
-                    self.metaobj,
-                    python=self.versions['python'],
-                    numpy=self.versions['numpy']))
+        if CONDA_BUILD_MAJOR_VERSION == '2':
+            output_file_path = conda_build.api.get_output_file_path(
+                        self.metaobj,
+                        python=self.versions['python'],
+                        numpy=self.versions['numpy'])
+        if CONDA_BUILD_MAJOR_VERSION == '3':
+            output_file_path = conda_build.api.get_output_file_paths(
+                        self.metaobj,
+                        python=self.versions['python'],
+                        numpy=self.versions['numpy'])[0]
+        self.canonical_name = os.path.basename(output_file_path)
 
 
 class MetaSet(object):
