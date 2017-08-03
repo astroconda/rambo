@@ -144,6 +144,7 @@ class MetaSet(object):
 
     def __init__(self,
                  directory,
+                 platform_arch,
                  versions,
                  manfile=None,
                  dirty=False):
@@ -153,7 +154,8 @@ class MetaSet(object):
         versions - Dictionary containing python, numpy, etc, version
           information.'''
         self.metas = []
-        self.platform = Config.platform
+        self.platform_arch = platform_arch
+        Config.platform = self.platform_arch.split('-')[0]
         self.versions = versions
         self.manfile = manfile
         self.manifest = None
@@ -204,7 +206,7 @@ class MetaSet(object):
         mf = open(self.manfile, 'r')
         self.manifest = safe_load(mf)
         self.channel = self.manifest['channel_URL'].strip('/')
-        self.channel += '/' + self.platform
+        self.channel += '/' + self.platform_arch
         self.versions['numpy'] = str(self.manifest['numpy_version'])
 
     def filter_by_manifest(self):

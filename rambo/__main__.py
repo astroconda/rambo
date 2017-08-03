@@ -10,7 +10,7 @@ import sys
 import argparse
 from . import meta
 
-def get_platform():
+def get_platform_arch():
     plat_alias = sys.platform
     if plat_alias == 'darwin':
         plat_alias = 'osx'
@@ -18,8 +18,8 @@ def get_platform():
     arch_bits = '64'
     if not is64bit:
         arch_bits = '32'
-    platform = '{}-{}'.format(plat_alias, arch_bits)
-    return platform
+    platform_arch = '{}-{}'.format(plat_alias, arch_bits)
+    return platform_arch
 
 
 def main(argv=None):
@@ -31,10 +31,10 @@ def main(argv=None):
             prog='rambo',
             description='Recipe Analyzer and Multi-Package Build Optimizer')
     parser.add_argument('-p',
-            '--platform',
+            '--platform_arch',
             type=str,
-            help='The platform specification string in the format that conda'
-            ' understands. I.e. "linux-64" or "osx-64". If not specified, the'
+            help='The platform-arch specification string in the format that'
+            ' conda uses. I.e. "linux-64" or "osx-64". If not specified, the'
             ' platform of the host system is used.')
     parser.add_argument(
             '--python',
@@ -93,13 +93,17 @@ def main(argv=None):
 
     versions['numpy'] = meta.DEFAULT_MINIMUM_NUMPY_VERSION
 
-    if args.platform:
-        meta.Config.platform = args.platform
+    if args.platform_arch:
+        #meta.Config.platform = args.platform_arch
+        platform_arch = args.platform_arch
     else:
-        meta.Config.platform = get_platform()
+        #meta.Config.platform = get_platform_arch()
+        platform_arch = get_platform_arch()
+
 
     mset = meta.MetaSet(
             recipes_dir,
+            platform_arch,
             versions=versions,
             dirty=args.dirty,
             manfile=args.manifest)
