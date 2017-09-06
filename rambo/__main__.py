@@ -43,6 +43,13 @@ def main(argv=None):
             'recipes. "#.#" format. If not specified, the version of python'
             ' hosting conda_build.api is used.')
     parser.add_argument(
+            '--numpy',
+            type=str,
+            help='numpy version to pass to conda machinery when rendering '
+            'recipes. "#.#" format. If not specified, the version value \'{}\''
+            ' is used.'.format(
+                meta.DEFAULT_MINIMUM_NUMPY_VERSION))
+    parser.add_argument(
             '-m',
             '--manifest',
             type=str,
@@ -91,15 +98,15 @@ def main(argv=None):
     if args.python:
         versions['python'] = args.python
 
-    versions['numpy'] = meta.DEFAULT_MINIMUM_NUMPY_VERSION
+    if args.numpy:
+        versions['numpy'] = args.numpy
+    else:
+        versions['numpy'] = meta.DEFAULT_MINIMUM_NUMPY_VERSION
 
     if args.platform_arch:
-        #meta.Config.platform = args.platform_arch
         platform_arch = args.platform_arch
     else:
-        #meta.Config.platform = get_platform_arch()
         platform_arch = get_platform_arch()
-
 
     mset = meta.MetaSet(
             recipes_dir,
