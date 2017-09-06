@@ -207,7 +207,6 @@ class MetaSet(object):
         self.manifest = safe_load(mf)
         self.channel = self.manifest['channel_URL'].strip('/')
         self.channel += '/' + self.platform_arch
-        #self.versions['numpy'] = str(self.manifest['numpy_version'])
 
     def filter_by_manifest(self):
         '''Leave only the recipe metadata entries that appear in the
