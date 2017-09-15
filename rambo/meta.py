@@ -61,16 +61,22 @@ class Meta(object):
         the conda recipe renderer to perform string interpolation and
         store the values in a dictionary.'''
         if os.path.isfile(rdir + '/meta.yaml'):
-            self.render_payload = conda_build.api.render(
-                rdir,
-                dirty=self.dirty,
-                python=self.versions['python'],
-                numpy=self.versions['numpy'])
             if CONDA_BUILD_MAJOR_VERSION == '2':
+                self.render_payload = conda_build.api.render(
+                    rdir,
+                    dirty=self.dirty,
+                    python=self.versions['python'],
+                    numpy=self.versions['numpy'])
                 # conda-build v2.x render() returns a tuple:
                 #  (MetaData, bool, bool)
                 self.metaobj = self.render_payload[0]
             if CONDA_BUILD_MAJOR_VERSION == '3':
+                self.render_payload = conda_build.api.render(
+                    rdir,
+                    dirty=self.dirty,
+                    python=self.versions['python'],
+                    numpy=self.versions['numpy'],
+                    filename_hashing=False)
                 # conda-build v3.x render() return a list of tuples:
                 #  [(MetaData, bool, bool)]
                 self.metaobj = self.render_payload[0][0]
