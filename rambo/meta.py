@@ -35,9 +35,10 @@ class Meta(object):
     certain values derived from that data, and methods to calculate those
     derived values.'''
 
-    def __init__(self, recipe_dir, versions, dirty=False):
+    def __init__(self, recipe_dir, versions, channel, dirty=False):
         self.recipe_dirname = os.path.basename(recipe_dir)
         self.versions = versions
+        self.channel = channel
         self.dirty = dirty
         self.metaobj = None     # renderdata[0] (MetaData)
         self.mdata = None       # renderdata[0].meta (dict)
@@ -66,7 +67,7 @@ class Meta(object):
                     rdir,
                     dirty=self.dirty,
                     python=self.versions['python'],
-                    numpy=self.versions['numpy'])
+                    Numpy=self.versions['numpy'])
                 # conda-build v2.x render() returns a tuple:
                 #  (MetaData, bool, bool)
                 self.metaobj = self.render_payload[0]
@@ -76,8 +77,9 @@ class Meta(object):
                     dirty=self.dirty,
                     python=self.versions['python'],
                     numpy=self.versions['numpy'],
+                    channel_urls=[self.channel],
                     filename_hashing=False)
-                # conda-build v3.x render() return a list of tuples:
+                # conda-build v3.x render() returns a list of tuples:
                 #  [(MetaData, bool, bool)]
                 self.metaobj = self.render_payload[0][0]
             self.mdata = self.metaobj.meta
@@ -188,7 +190,10 @@ class MetaSet(object):
             if rdirname in self.ignore_dirs:
                 continue
             rdir = directory + '/' + rdirname
-            m = Meta(rdir, versions=self.versions, dirty=self.dirty)
+            m = Meta(rdir,
+                     versions=self.versions,
+                     channel=self.channel,
+                     dirty=self.dirty)
             if not m.metaobj.skip():
                 if m.complete:
                     self.metas.append(m)
