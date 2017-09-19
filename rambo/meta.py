@@ -90,7 +90,7 @@ class Meta(object):
             self.complete = self.is_complete()
             if self.valid:
                 self.name = self.mdata['package']['name']
-                print('\n{}'.format(conda_build.api.output_yaml(self.metaobj)))
+                #print('\n{}'.format(conda_build.api.output_yaml(self.metaobj)))
             if self.metaobj.skip():
                 print('skipping on selected platform due to directive: {}'.format(
                     self.name))
