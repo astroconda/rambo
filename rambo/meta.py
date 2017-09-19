@@ -62,6 +62,9 @@ class Meta(object):
         the conda recipe renderer to perform string interpolation and
         store the values in a dictionary.'''
         if os.path.isfile(rdir + '/meta.yaml'):
+            print('========================================'
+                  '========================================')
+            print('Rendering recipe for {}'.format(rdir))
             if CONDA_BUILD_MAJOR_VERSION == '2':
                 self.render_payload = conda_build.api.render(
                     rdir,
@@ -78,7 +81,7 @@ class Meta(object):
                     python=self.versions['python'],
                     numpy=self.versions['numpy'],
                     channel_urls=[self.channel],
-                    filename_hashing=False)
+                    filename_hashing=False)  # enables --old-build-string
                 # conda-build v3.x render() returns a list of tuples:
                 #  [(MetaData, bool, bool)]
                 self.metaobj = self.render_payload[0][0]
@@ -87,6 +90,7 @@ class Meta(object):
             self.complete = self.is_complete()
             if self.valid:
                 self.name = self.mdata['package']['name']
+                print('\n{}'.format(conda_build.api.output_yaml(self.metaobj)))
             if self.metaobj.skip():
                 print('skipping on selected platform due to directive: {}'.format(
                     self.name))
@@ -141,6 +145,8 @@ class Meta(object):
                         python=self.versions['python'],
                         numpy=self.versions['numpy'])[0]
         self.canonical_name = os.path.basename(output_file_path)
+        print('Package canonical name: {}\n\n'.format(
+                self.canonical_name))
 
 
 class MetaSet(object):
