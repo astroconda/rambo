@@ -9,12 +9,14 @@ python interprer's search list in order to access the API machinery via
 from __future__ import print_function
 import os
 import sys
+import time
 from copy import deepcopy
 import argparse
 from six.moves import urllib
 import codecs
 from yaml import safe_load
 import json
+from jinja2 import Environment, FileSystemLoader, Template
 from ._version import __version__
 try:
     import conda_build.api
@@ -49,7 +51,8 @@ class Meta(object):
         self.num_bdeps = 0
         self.deps = []
         self.peer_bdeps = []
-        self.import_metadata(recipe_dir)
+        #self.import_metadata(recipe_dir)
+        self.import_metadata(recipe_dir, True)
         self.derive_values()
         self.canonical_name = ''
         # Whether or not the package with this metadata
@@ -57,7 +60,7 @@ class Meta(object):
         self.archived = False
         self.gen_canonical()
 
-    def import_metadata(self, rdir):
+    def import_metadata(self, rdir, skip_render_of_archived=True):
         '''Read in the package metadata from the given recipe directory via
         the conda recipe renderer to perform string interpolation and
         store the values in a dictionary.'''
@@ -65,6 +68,7 @@ class Meta(object):
             print('========================================'
                   '========================================')
             print('Rendering recipe for {}'.format(rdir))
+
             if CONDA_BUILD_MAJOR_VERSION == '2':
                 self.render_payload = conda_build.api.render(
                     rdir,
@@ -74,6 +78,7 @@ class Meta(object):
                 # conda-build v2.x render() returns a tuple:
                 #  (MetaData, bool, bool)
                 self.metaobj = self.render_payload[0]
+
             if CONDA_BUILD_MAJOR_VERSION == '3':
                 self.render_payload = conda_build.api.render(
                     rdir,
@@ -85,6 +90,7 @@ class Meta(object):
                 # conda-build v3.x render() returns a list of tuples:
                 #  [(MetaData, bool, bool)]
                 self.metaobj = self.render_payload[0][0]
+
             self.mdata = self.metaobj.meta
             self.valid = self.is_valid()
             self.complete = self.is_complete()
@@ -92,8 +98,8 @@ class Meta(object):
                 self.name = self.mdata['package']['name']
                 #print('\n{}'.format(conda_build.api.output_yaml(self.metaobj)))
             if self.metaobj.skip():
-                print('skipping on selected platform due to directive: {}'.format(
-                    self.name))
+                print('skipping on selected platform due to directive'
+                      ': {}'.format(self.name))
         else:
             print('Recipe directory {0} has no meta.yaml file.'.format(
                 self.recipe_dirname))
@@ -131,6 +137,23 @@ class Meta(object):
             complete = False
         return complete
 
+    #def gen_canonical(self):
+    #    '''Generate the package's canonical name using available
+    #    information.'''
+    #    if CONDA_BUILD_MAJOR_VERSION == '2':
+    #        output_file_path = conda_build.api.get_output_file_path(
+    #                    self.metaobj,
+    #                    python=self.versions['python'],
+    #                    numpy=self.versions['numpy'])
+    #    if CONDA_BUILD_MAJOR_VERSION == '3':
+    #        output_file_path = conda_build.api.get_output_file_paths(
+    #                    self.metaobj,
+    #                    python=self.versions['python'],
+    #                    numpy=self.versions['numpy'])[0]
+    #    self.canonical_name = os.path.basename(output_file_path)
+    #    print('Package canonical name: {}\n\n'.format(
+    #            self.canonical_name))
+
     def gen_canonical(self):
         '''Generate the package's canonical name using available
         information.'''
@@ -140,6 +163,10 @@ class Meta(object):
                         python=self.versions['python'],
                         numpy=self.versions['numpy'])
         if CONDA_BUILD_MAJOR_VERSION == '3':
+            # Old-build-string method
+            #  set up jinja2 env
+
+            # New, hashy build string method
             output_file_path = conda_build.api.get_output_file_paths(
                         self.metaobj,
                         python=self.versions['python'],
@@ -147,7 +174,6 @@ class Meta(object):
         self.canonical_name = os.path.basename(output_file_path)
         print('Package canonical name: {}\n\n'.format(
                 self.canonical_name))
-
 
 class MetaSet(object):
     '''A collection of mulitple recipe metadata objects from a directory
@@ -176,36 +202,76 @@ class MetaSet(object):
         self.channel = None
         if self.manfile:
             self.read_manifest()
-            self.filter_by_manifest()
+            #REMOVE self.filter_by_manifest()
+        if self.channel:
+            self.channel_data = self.get_channel_data()
         self.dirty = dirty
         self.incomplete_metas = []
         self.names = []
+        # pre-cull option here
         self.read_recipes(directory)
+        if self.manfile:
+            self.filter_by_manifest()
         self.derive_values()
         self.sort_by_peer_bdeps()
         self.merge_metas()
         if self.channel:
-            self.channel_data = self.get_channel_data()
+            #self.channel_data = self.get_channel_data()
             self.flag_archived()
 
     def read_recipe_selection(self, directory, recipe_list):
         '''Process a directory reading in each conda recipe found, creating
         a list of metadata objects for use in analyzing the collection of
         recipes as a whole.'''
+        env = Environment(loader=FileSystemLoader(directory))
         for rdirname in recipe_list:
             if rdirname in self.ignore_dirs:
                 continue
             rdir = directory + '/' + rdirname
-            m = Meta(rdir,
-                     versions=self.versions,
-                     channel=self.channel,
-                     dirty=self.dirty)
-            if not m.metaobj.skip():
-                if m.complete:
-                    self.metas.append(m)
-                    self.names.append(m.name)
-                else:
-                    self.incomplete_metas.append(m)
+
+            # If requested, quickly pre-process templates here, and only
+            # instantiate (and render) metadata for recipes that have names
+            # which do not appear in channel archive.
+            print('rdir: {}'.format(rdir))
+            env.globals['environ'] = os.environ
+
+            # First pass (for -dev), only pass for -contrib
+            template = env.get_template(rdirname+'/meta.yaml')
+            output = template.render(environment=env)
+            fastyaml = safe_load(output)
+            try:
+                rundep_names = [x.split()[0] for x in
+                        fastyaml['requirements']['run']]
+            except:
+                print('Incomplete metadata...')
+                continue # TODO 'incomplete' metadata still needs to be rendered.
+
+            if 'python' in rundep_names:
+                build_string = 'py{}_'.format(
+                        self.versions['python'].replace('.',''))
+            else:
+                build_string = ''
+            pkgname = fastyaml['package']['name']
+            fast_canonical = '{}-{}-{}{}.tar.bz2'.format(
+                pkgname,
+                fastyaml['package']['version'],
+                build_string,
+                fastyaml['build']['number'])
+            print('Fast    canonical name: {}'.format(fast_canonical))
+
+            #
+            build_id = pkgname + "_" + str(int(time.time() * 1000))
+            if not self.is_archived(fast_canonical):
+                m = Meta(rdir,
+                         versions=self.versions,
+                         channel=self.channel,
+                         dirty=self.dirty)
+                if not m.metaobj.skip():
+                    if m.complete:
+                        self.metas.append(m)
+                        self.names.append(m.name)
+                    else:
+                        self.incomplete_metas.append(m)
 
     def read_recipes(self, directory):
         recipe_dirnames = os.listdir(directory)
@@ -229,6 +295,7 @@ class MetaSet(object):
         '''Leave only the recipe metadata entries that appear in the
         provided manifest list active.'''
         for meta in self.metas:
+            print('--> {}'.format(meta.name))
             if meta.name not in self.manifest['packages']:
                 meta.active = False
 
@@ -351,11 +418,17 @@ class MetaSet(object):
         reader = codecs.getreader('utf-8')
         return json.load(reader(jsonbytes))
 
+    def is_archived(self, canonical_name):
+        if canonical_name in self.channel_data['packages'].keys():
+            return True
+        else:
+            return False
+
     def flag_archived(self):
-        '''Flag each meta as either being archived or not by generating the
-        package canonical name, fetching the provided conda channel
-        archive data, and searching the archive data for the generated
-        name. Each meta's 'archived' attribute is set to True if found
+        '''Flag each meta as either being archived or not by comparing the
+        locally generated package canonical name with the names present in
+        the supplied channel archive data.
+        Each meta's 'archived' attribute is set to True if found
         and False if not.'''
         for meta in self.metas:
             if meta.canonical_name in self.channel_data['packages'].keys():
