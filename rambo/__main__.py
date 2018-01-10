@@ -39,7 +39,7 @@ def main(argv=None):
     parser.add_argument(
             '--python',
             type=str,
-            help='Python version to pass to conda machinery when rendering '
+            help='Python version to pass to conda machinery when  '
             'recipes. "#.#" format. If not specified, the version of python'
             ' hosting conda_build.api is used.')
     parser.add_argument(
@@ -65,22 +65,21 @@ def main(argv=None):
             action='store_true',
             help='Print the ordered list of package names reduced to the set'
             ' of packages that do not already exist in the channel specified'
-            ' in the supplied manifest file.')
+            ' in the supplied manifest file. This uses fast canonical name '
+            'generation to skip rendering recipes that would produce a file'
+            ' name already present in the channel index.\n'
+            'NOTE: Not using this option will attempt to render every '
+            ' recipe in the manifest and may take a long time for recipes '
+            'that have long dependency chains and for those which rely upon'
+            ' a git clone operation to obtain values needed to render the '
+            'recipe.')
     parser.add_argument(
             '-d',
             '--details',
             action='store_true',
             help='Display details used in determining build order and/or '
             'package culling.')
-    parser.add_argument(
-            '-r',
-            '--render-all',
-            action='store_true',
-            help='Render all recipes. I.e. do not perform fast package '
-            'canonical name generation and comparison with published '
-            'package index to avoid rendering packages that already '
-            'exist.')
-    parser.add_argument(
+    earser.add_argument(
             '--dirty',
             action='store_true',
             help='Use the most recent pre-existing conda work directory for '
@@ -120,9 +119,9 @@ def main(argv=None):
             recipes_dir,
             platform_arch,
             versions=versions,
+            culled=args.culled,
             dirty=args.dirty,
-            manfile=args.manifest,
-            render_all=args.render_all)
+            manfile=args.manifest)
 
     mset.multipass_optimize()
 

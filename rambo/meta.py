@@ -170,9 +170,9 @@ class MetaSet(object):
                  directory,
                  platform_arch,
                  versions,
+                 culled,
                  manfile=None,
-                 dirty=False,
-                 render_all=False):
+                 dirty=False):
         '''Parameters:
         directory - a relative or absolute directory in which Conda
           recipe subdirectories may be found.
@@ -191,7 +191,7 @@ class MetaSet(object):
         if self.channel:
             self.channel_data = self.get_channel_data()
         self.dirty = dirty
-        self.render_all = render_all
+        self.culled = culled
         self.incomplete_metas = []
         self.names = []
         self.read_recipes(directory)
@@ -220,7 +220,7 @@ class MetaSet(object):
             # skip rendering the recipe entirely if a package with that name
             # already exists. This saves great deal of time compared to rendering
             # every recipe to determine the canonical names.
-            if not self.render_all:
+            if self.culled:
                 # If requested, quickly pre-process templates here, and only
                 # instantiate (and render) metadata for recipes that have names
                 # which do not appear in channel archive.
@@ -306,12 +306,12 @@ class MetaSet(object):
                     build_string,
                     fastyaml['build']['number'])
 
-                print('fast_canonical: {}'.format(fast_canonical))
-
                 # Move on to the next recipe dir if the package name
                 # already exists in the channel data.
                 if self.is_archived(fast_canonical):
                     continue
+                else:
+                    print('fast_canonical: {}'.format(fast_canonical))
 
             m = Meta(rdir,
                      versions=self.versions,
