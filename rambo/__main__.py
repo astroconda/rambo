@@ -73,6 +73,14 @@ def main(argv=None):
             help='Display details used in determining build order and/or '
             'package culling.')
     parser.add_argument(
+            '-r',
+            '--render-all',
+            action='store_true',
+            help='Render all recipes. I.e. do not perform fast package '
+            'canonical name generation and comparison with published '
+            'package index to avoid rendering packages that already '
+            'exist.')
+    parser.add_argument(
             '--dirty',
             action='store_true',
             help='Use the most recent pre-existing conda work directory for '
@@ -113,7 +121,8 @@ def main(argv=None):
             platform_arch,
             versions=versions,
             dirty=args.dirty,
-            manfile=args.manifest)
+            manfile=args.manifest,
+            render_all=args.render_all)
 
     mset.multipass_optimize()
 

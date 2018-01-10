@@ -10,10 +10,13 @@ from __future__ import print_function
 import os
 import sys
 import time
+import re
 from copy import deepcopy
 import argparse
+import subprocess
 from six.moves import urllib
 import codecs
+import yaml
 from yaml import safe_load
 import json
 from jinja2 import Environment, FileSystemLoader, Template
@@ -58,7 +61,7 @@ class Meta(object):
         # Whether or not the package with this metadata
         # already exists in the channel archive
         self.archived = False
-        self.gen_canonical()
+        self.render_canonical()
 
     def import_metadata(self, rdir, skip_render_of_archived=True):
         '''Read in the package metadata from the given recipe directory via
@@ -137,9 +140,9 @@ class Meta(object):
             complete = False
         return complete
 
-    #def gen_canonical(self):
-    #    '''Generate the package's canonical name using available
-    #    information.'''
+    #def render_canonical(self):
+    #    '''Generate the package's canonical name by using conda
+    #    machinery to render the recipe.'''
     #    if CONDA_BUILD_MAJOR_VERSION == '2':
     #        output_file_path = conda_build.api.get_output_file_path(
     #                    self.metaobj,
@@ -154,23 +157,21 @@ class Meta(object):
     #    print('Package canonical name: {}\n\n'.format(
     #            self.canonical_name))
 
-    def gen_canonical(self):
-        '''Generate the package's canonical name using available
-        information.'''
+    def render_canonical(self):
+        '''Generate the package's canonical name by using conda
+        machinery to render the recipe.'''
         if CONDA_BUILD_MAJOR_VERSION == '2':
             output_file_path = conda_build.api.get_output_file_path(
                         self.metaobj,
                         python=self.versions['python'],
-                        numpy=self.versions['numpy'])
+                        numpy=self.versions['numpy'],
+                        dirty=self.dirty)
         if CONDA_BUILD_MAJOR_VERSION == '3':
-            # Old-build-string method
-            #  set up jinja2 env
-
-            # New, hashy build string method
             output_file_path = conda_build.api.get_output_file_paths(
                         self.metaobj,
                         python=self.versions['python'],
-                        numpy=self.versions['numpy'])[0]
+                        numpy=self.versions['numpy'],
+                        dirty=self.dirty)[0]
         self.canonical_name = os.path.basename(output_file_path)
         print('Package canonical name: {}\n\n'.format(
                 self.canonical_name))
@@ -187,7 +188,8 @@ class MetaSet(object):
                  platform_arch,
                  versions,
                  manfile=None,
-                 dirty=False):
+                 dirty=False,
+                 render_all=False):
         '''Parameters:
         directory - a relative or absolute directory in which Conda
           recipe subdirectories may be found.
@@ -206,9 +208,9 @@ class MetaSet(object):
         if self.channel:
             self.channel_data = self.get_channel_data()
         self.dirty = dirty
+        self.render_all = render_all
         self.incomplete_metas = []
         self.names = []
-        # pre-cull option here
         self.read_recipes(directory)
         if self.manfile:
             self.filter_by_manifest()
@@ -216,7 +218,6 @@ class MetaSet(object):
         self.sort_by_peer_bdeps()
         self.merge_metas()
         if self.channel:
-            #self.channel_data = self.get_channel_data()
             self.flag_archived()
 
     def read_recipe_selection(self, directory, recipe_list):
@@ -224,65 +225,134 @@ class MetaSet(object):
         a list of metadata objects for use in analyzing the collection of
         recipes as a whole.'''
         env = Environment(loader=FileSystemLoader(directory))
+        # TODO: Pre-filter recipe list by intersection of dir listing and manifest
         for rdirname in recipe_list:
+            #print('\n{}'.format(rdirname))
             if rdirname in self.ignore_dirs:
                 continue
             rdir = directory + '/' + rdirname
 
-            # If requested, quickly pre-process templates here, and only
-            # instantiate (and render) metadata for recipes that have names
-            # which do not appear in channel archive.
-            print('rdir: {}'.format(rdir))
-            env.globals['environ'] = os.environ
+            # Default beavior is to quickly generate each package canonical name,
+            # check for the presence of that name in the channel archive, and
+            # skip rendering the recipe entirely if a package with that name
+            # already exists. This saves great deal of time compared to rendering
+            # every recipe to determine the canonical names.
+            if not self.render_all:
+                # If requested, quickly pre-process templates here, and only
+                # instantiate (and render) metadata for recipes that have names
+                # which do not appear in channel archive.
+                #print('rdir: {}'.format(rdir))
+                env.globals['environ'] = os.environ
 
-            # First pass (for -dev), only pass for -contrib
-            template = env.get_template(rdirname+'/meta.yaml')
-            output = template.render(environment=env)
-            fastyaml = safe_load(output)
-            try:
-                rundep_names = [x.split()[0] for x in
-                        fastyaml['requirements']['run']]
-            except:
-                print('Incomplete metadata...')
-                continue # TODO 'incomplete' metadata still needs to be rendered.
-
-            if 'python' in rundep_names:
-                build_string = 'py{}_'.format(
-                        self.versions['python'].replace('.',''))
-            else:
+                # First pass (for -dev), only pass for -contrib
+                template = env.get_template(rdirname+'/meta.yaml')
+                output = template.render(environment=env)
+                # BaseLoader here is required to interpret all values as strings
+                # to correctly handle things like version = '3.410` without
+                # dropping the trailing 0.
+                fastyaml = yaml.load(output, Loader=yaml.BaseLoader)
+                # Determine if a 'pyXX' build string is necessary in the package name
+                # by looking for 'python' in the run requirements.
+                # TODO: Check for build requirement too?
                 build_string = ''
-            pkgname = fastyaml['package']['name']
-            fast_canonical = '{}-{}-{}{}.tar.bz2'.format(
-                pkgname,
-                fastyaml['package']['version'],
-                build_string,
-                fastyaml['build']['number'])
-            print('Fast    canonical name: {}'.format(fast_canonical))
+                rundep_names = []
+                try:
+                    rundep_names = [x.split()[0] for x in
+                            fastyaml['requirements']['build']]
+                except:
+                    rundep_names = ''
+                    print('"Incomplete" metadata. No build requirements.')
 
-            #
-            build_id = pkgname + "_" + str(int(time.time() * 1000))
-            if not self.is_archived(fast_canonical):
-                m = Meta(rdir,
-                         versions=self.versions,
-                         channel=self.channel,
-                         dirty=self.dirty)
-                if not m.metaobj.skip():
-                    if m.complete:
-                        self.metas.append(m)
-                        self.names.append(m.name)
-                    else:
-                        self.incomplete_metas.append(m)
+                if 'python' in rundep_names:
+                    build_string = 'py{}_'.format(
+                            self.versions['python'].replace('.',''))
+
+                pkgname = fastyaml['package']['name']
+
+                # Some recipes (mostly -dev) require extra steps to obtain the source for
+                # generating template replacement values.
+                # Check for which recipes need additional processing here...
+                # TODO: adjust selection criteria
+                if re.search('\.dev', str(fastyaml['package']['version'])): 
+                    # Compute the build ID value and create a directory for use
+                    # when cloning the source to populate -dev recipe fields
+                    # that rely upon values supplied by git.
+                    # This approach was taken directly from conda-build's source.
+                    build_id = pkgname + "_" + str(int(time.time() * 1000))
+                    # Locate the conda-build directory of the available conda installation
+                    conda_path = subprocess.check_output(['which', 'conda']).strip().decode()
+                    conda_root = conda_path.rstrip('/bin/conda')
+                    build_root = os.path.join(conda_root, 'conda-bld')
+                    build_dir = os.path.join(build_root, build_id, 'work')
+                    os.makedirs(build_dir)
+                    try:
+                        cmd = ['git', 'clone', fastyaml['source']['git_url'], build_dir]
+                        # clone repo into build_dir
+                        subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+                        # Check out specific git_rev, if provided in recipe.
+                        cdir = os.getcwd()
+                        os.chdir(build_dir)
+                        try:
+                            cmd = ['git', 'checkout', fastyaml['source']['git_rev']]
+                            subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+                        except(KeyError):
+                            pass
+                        os.chdir(cdir)
+                        script_dir = os.getcwd()
+                        os.chdir(build_dir)
+                        cmd = ['git', 'describe', '--tags', '--long']
+                        describe_output = subprocess.check_output(cmd).decode().split('-')
+                        os.chdir(script_dir)
+                        gd_tag = describe_output[0]
+                        gd_number = describe_output[1]
+                        gd_hash = describe_output[2]
+                        os.environ['GIT_DESCRIBE_TAG'] = gd_tag
+                        # Render the template again using the obtained git describe
+                        # variables.
+                        output = template.render(environment=env,
+                                GIT_DESCRIBE_TAG=gd_tag,
+                                GIT_DESCRIBE_NUMBER=gd_number,
+                                GIT_DESCRIBE_HASH=gd_hash)
+                        fastyaml = safe_load(output)
+                    except(KeyError):
+                        print('no source field in recipe: {}'.format(pkgname))
+
+                fast_canonical = '{}-{}-{}{}.tar.bz2'.format(
+                    pkgname,
+                    str(fastyaml['package']['version']),
+                    build_string,
+                    fastyaml['build']['number'])
+
+                print('fast_canonical: {}'.format(fast_canonical))
+
+                # Move on to the next recipe dir if the package name
+                # already exists in the channel data.
+                if self.is_archived(fast_canonical):
+                    continue
+
+            m = Meta(rdir,
+                     versions=self.versions,
+                     channel=self.channel,
+                     dirty=self.dirty)
+            if not m.metaobj.skip():
+                if m.complete:
+                    self.metas.append(m)
+                    self.names.append(m.name)
+                else:
+                    self.incomplete_metas.append(m)
 
     def read_recipes(self, directory):
         recipe_dirnames = os.listdir(directory)
         # If a manifest was given, use it to filter the list of available
         # recipes.
         if self.manifest:
-            recipe_list = set.intersection(
+            rset = set.intersection(
                 set(recipe_dirnames),
                 set(self.manifest['packages']))
         else:
-            recipe_list = recipe_dirnames
+            rset = recipe_dirnames
+        recipe_list = list(rset)
+        recipe_list.sort()
         self.read_recipe_selection(directory, recipe_list)
 
     def read_manifest(self):
