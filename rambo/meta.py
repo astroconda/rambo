@@ -140,23 +140,6 @@ class Meta(object):
             complete = False
         return complete
 
-    #def render_canonical(self):
-    #    '''Generate the package's canonical name by using conda
-    #    machinery to render the recipe.'''
-    #    if CONDA_BUILD_MAJOR_VERSION == '2':
-    #        output_file_path = conda_build.api.get_output_file_path(
-    #                    self.metaobj,
-    #                    python=self.versions['python'],
-    #                    numpy=self.versions['numpy'])
-    #    if CONDA_BUILD_MAJOR_VERSION == '3':
-    #        output_file_path = conda_build.api.get_output_file_paths(
-    #                    self.metaobj,
-    #                    python=self.versions['python'],
-    #                    numpy=self.versions['numpy'])[0]
-    #    self.canonical_name = os.path.basename(output_file_path)
-    #    print('Package canonical name: {}\n\n'.format(
-    #            self.canonical_name))
-
     def render_canonical(self):
         '''Generate the package's canonical name by using conda
         machinery to render the recipe.'''
