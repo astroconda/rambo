@@ -79,7 +79,7 @@ def main(argv=None):
             action='store_true',
             help='Display details used in determining build order and/or '
             'package culling.')
-    earser.add_argument(
+    parser.add_argument(
             '--dirty',
             action='store_true',
             help='Use the most recent pre-existing conda work directory for '
