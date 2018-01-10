@@ -39,7 +39,7 @@ def main(argv=None):
     parser.add_argument(
             '--python',
             type=str,
-            help='Python version to pass to conda machinery when rendering '
+            help='Python version to pass to conda machinery when  '
             'recipes. "#.#" format. If not specified, the version of python'
             ' hosting conda_build.api is used.')
     parser.add_argument(
@@ -65,7 +65,14 @@ def main(argv=None):
             action='store_true',
             help='Print the ordered list of package names reduced to the set'
             ' of packages that do not already exist in the channel specified'
-            ' in the supplied manifest file.')
+            ' in the supplied manifest file. This uses fast canonical name '
+            'generation to skip rendering recipes that would produce a file'
+            ' name already present in the channel index.\n'
+            'NOTE: Not using this option will attempt to render every '
+            ' recipe in the manifest and may take a long time for recipes '
+            'that have long dependency chains and for those which rely upon'
+            ' a git clone operation to obtain values needed to render the '
+            'recipe.')
     parser.add_argument(
             '-d',
             '--details',
@@ -112,6 +119,7 @@ def main(argv=None):
             recipes_dir,
             platform_arch,
             versions=versions,
+            culled=args.culled,
             dirty=args.dirty,
             manfile=args.manifest)
 
