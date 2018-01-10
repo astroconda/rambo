@@ -244,7 +244,7 @@ class MetaSet(object):
                             fastyaml['requirements']['build']]
                 except:
                     rundep_names = ''
-                    print('"Incomplete" metadata. No build requirements.')
+                    # TODO INFO print('"Incomplete" metadata. No build requirements.')
 
                 if 'python' in rundep_names:
                     build_string = 'py{}_'.format(
@@ -309,9 +309,8 @@ class MetaSet(object):
                 # Move on to the next recipe dir if the package name
                 # already exists in the channel data.
                 if self.is_archived(fast_canonical):
-                    continue
-                else:
                     print('fast_canonical: {}'.format(fast_canonical))
+                    continue
 
             m = Meta(rdir,
                      versions=self.versions,
