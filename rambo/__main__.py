@@ -87,6 +87,12 @@ def main(argv=None):
             'does not already exist, the recipe is processed in the normal '
             'fashion. Used mostly for testing purposes.')
     parser.add_argument(
+            '--filter-nonpy',
+            action='store_true',
+            default=False,
+            help='Eliminate from the package list any packages that do '
+            'not depend on python.')
+    parser.add_argument(
             '-v',
             '--version',
             action='version',
@@ -96,10 +102,6 @@ def main(argv=None):
     args = parser.parse_args()
 
     recipes_dir = os.path.normpath(args.recipes_dir)
-
-    fh = None
-    if args.file:
-        fh = open(args.file, 'w')
 
     versions = {'python': '', 'numpy': ''}
     if args.python:
@@ -115,24 +117,33 @@ def main(argv=None):
     else:
         platform_arch = get_platform_arch()
 
+    if args.filter_nonpy and not args.culled:
+        print('--filter-nonpy specified. Enabling manifest culling.')
+        args.culled = True
+
     mset = meta.MetaSet(
             recipes_dir,
             platform_arch,
             versions=versions,
             culled=args.culled,
             dirty=args.dirty,
+            filter_nonpy=args.filter_nonpy,
             manfile=args.manifest)
 
     mset.multipass_optimize()
 
     if args.details:
-        mset.print_details(fh)
+        mset.print_details()
         if mset.channel:
-            mset.print_status_in_channel(fh)
-    elif args.culled:
-        mset.print_culled(fh)
+            mset.print_status_in_channel()
+        elif args.culled:
+            mset.print_culled()
+
+    if args.file:
+        mset.write(args.file)
     else:
-        mset.print(fh)
+        mset.print()
+
 
 if __name__ == "__main__":
     main()
