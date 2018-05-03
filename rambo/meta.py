@@ -54,7 +54,6 @@ class Meta(object):
         self.num_bdeps = 0
         self.deps = []
         self.peer_bdeps = []
-        #self.import_metadata(recipe_dir)
         self.import_metadata(recipe_dir, True)
         self.derive_values()
         self.canonical_name = ''
@@ -99,7 +98,6 @@ class Meta(object):
             self.complete = self.is_complete()
             if self.valid:
                 self.name = self.mdata['package']['name']
-                #print('\n{}'.format(conda_build.api.output_yaml(self.metaobj)))
             if self.metaobj.skip():
                 print('skipping on selected platform due to directive'
                       ': {}'.format(self.name))
@@ -159,6 +157,7 @@ class Meta(object):
         print('Package canonical name: {}\n\n'.format(
                 self.canonical_name))
 
+
 class MetaSet(object):
     '''A collection of mulitple recipe metadata objects from a directory
     specification, and methods for manipulationg and querying this
@@ -172,6 +171,7 @@ class MetaSet(object):
                  versions,
                  culled,
                  manfile=None,
+                 filter_nonpy=False,
                  dirty=False):
         '''Parameters:
         directory - a relative or absolute directory in which Conda
@@ -187,9 +187,9 @@ class MetaSet(object):
         self.channel = None
         if self.manfile:
             self.read_manifest()
-            #REMOVE self.filter_by_manifest()
         if self.channel:
             self.channel_data = self.get_channel_data()
+        self.filter_nonpy = filter_nonpy
         self.dirty = dirty
         self.culled = culled
         self.incomplete_metas = []
@@ -203,14 +203,69 @@ class MetaSet(object):
         if self.channel:
             self.flag_archived()
 
+    def render_template_from_source(self, rdir):
+        '''Render the recipe template using information harvested from
+        the source tree obtained via git.'''
+
+        directory, rdirname = os.path.split(rdir)
+        env = Environment(loader=FileSystemLoader(directory))
+        env.globals['environ'] = os.environ
+        # Compute the build ID value and create a directory for use when
+        # cloning the source to populate -dev recipe fields that rely upon
+        # values supplied by git.
+        # This approach was taken directly from conda-build.
+        template = env.get_template(rdirname+'/meta.yaml')
+        output = template.render(environment=env)
+
+        # BaseLoader here is required to interpret all values as strings
+        # to correctly handle things like version = '3.410` without
+        # dropping the trailing 0.
+        fastyaml = yaml.load(output, Loader=yaml.BaseLoader)
+        pkgname = fastyaml['package']['name']
+        build_id = pkgname + "_" + str(int(time.time() * 1000))
+
+        # Locate the conda-build directory of the available conda installation
+        conda_path = subprocess.check_output(['which', 'conda']).strip().decode()
+        conda_root = conda_path.rstrip('/bin/conda')
+        build_root = os.path.join(conda_root, 'conda-bld')
+        build_dir = os.path.join(build_root, build_id, 'work')
+        os.makedirs(build_dir)
+        try:
+            cmd = ['git', 'clone', fastyaml['source']['git_url'], build_dir]
+            # clone repo into build_dir
+            subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+            # Check out specific git_rev, if provided in recipe.
+            cdir = os.getcwd()
+            os.chdir(build_dir)
+            try:
+                cmd = ['git', 'checkout', fastyaml['source']['git_rev']]
+                subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+            except(KeyError):
+                pass
+            os.chdir(cdir)
+            script_dir = os.getcwd()
+            os.chdir(build_dir)
+            cmd = ['git', 'describe', '--tags', '--long']
+            describe_output = subprocess.check_output(cmd).decode().split('-')
+            os.chdir(script_dir)
+            gd_tag = describe_output[0]
+            gd_number = describe_output[1]
+            gd_hash = describe_output[2]
+            os.environ['GIT_DESCRIBE_TAG'] = gd_tag
+            # Render the template using the obtained git describe variables.
+            output = template.render(environment=env,
+                    GIT_DESCRIBE_TAG=gd_tag,
+                    GIT_DESCRIBE_NUMBER=gd_number,
+                    GIT_DESCRIBE_HASH=gd_hash)
+            return safe_load(output)
+        except(KeyError):
+            print('no source field in recipe: {}'.format(pkgname))
+
     def read_recipe_selection(self, directory, recipe_list):
-        '''Process a directory reading in each conda recipe found, creating
+        '''Process a directory, reading in each conda recipe found, creating
         a list of metadata objects for use in analyzing the collection of
         recipes as a whole.'''
-        env = Environment(loader=FileSystemLoader(directory))
-        # TODO: Pre-filter recipe list by intersection of dir listing and manifest
         for rdirname in recipe_list:
-            #print('\n{}'.format(rdirname))
             if rdirname in self.ignore_dirs:
                 continue
             rdir = directory + '/' + rdirname
@@ -224,7 +279,7 @@ class MetaSet(object):
                 # If requested, quickly pre-process templates here, and only
                 # instantiate (and render) metadata for recipes that have names
                 # which do not appear in channel archive.
-                #print('rdir: {}'.format(rdir))
+                env = Environment(loader=FileSystemLoader(directory))
                 env.globals['environ'] = os.environ
 
                 # First pass (for -dev), only pass for -contrib
@@ -239,12 +294,28 @@ class MetaSet(object):
                 # TODO: Check for build requirement too?
                 build_string = ''
                 rundep_names = []
+                blddep_names = []
                 try:
                     rundep_names = [x.split()[0] for x in
-                            fastyaml['requirements']['build']]
+                            fastyaml['requirements']['run']]
                 except:
                     rundep_names = ''
-                    # TODO INFO print('"Incomplete" metadata. No build requirements.')
+                    # TODO INFO 
+                    print('"Incomplete" metadata. No run requirements.')
+
+                try:
+                     blddep_names = [x.split()[0] for x in
+                             fastyaml['requirements']['build']]
+                except:
+                    blddep_names = ''
+                    print('"Incomplete" metadata. No build requirements.')
+
+                # If filter-nonpy specified, skip all recipes that have a python
+                # dependency.
+                if self.filter_nonpy:
+                    if 'python' not in rundep_names and 'python' not in blddep_names:
+                        print('Skipping {} due to --filter-nonpy'.format(rdir))
+                        continue
 
                 if 'python' in rundep_names:
                     build_string = 'py{}_'.format(
@@ -253,52 +324,10 @@ class MetaSet(object):
                 pkgname = fastyaml['package']['name']
 
                 # Some recipes (mostly -dev) require extra steps to obtain the source for
-                # generating template replacement values.
-                # Check for which recipes need additional processing here...
-                # TODO: adjust selection criteria
+                # generating template replacement values. Handle this extra processing
+                # for all recipes that produced a 'dev' within the package name above.
                 if re.search('\.dev', str(fastyaml['package']['version'])): 
-                    # Compute the build ID value and create a directory for use
-                    # when cloning the source to populate -dev recipe fields
-                    # that rely upon values supplied by git.
-                    # This approach was taken directly from conda-build's source.
-                    build_id = pkgname + "_" + str(int(time.time() * 1000))
-                    # Locate the conda-build directory of the available conda installation
-                    conda_path = subprocess.check_output(['which', 'conda']).strip().decode()
-                    conda_root = conda_path.rstrip('/bin/conda')
-                    build_root = os.path.join(conda_root, 'conda-bld')
-                    build_dir = os.path.join(build_root, build_id, 'work')
-                    os.makedirs(build_dir)
-                    try:
-                        cmd = ['git', 'clone', fastyaml['source']['git_url'], build_dir]
-                        # clone repo into build_dir
-                        subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-                        # Check out specific git_rev, if provided in recipe.
-                        cdir = os.getcwd()
-                        os.chdir(build_dir)
-                        try:
-                            cmd = ['git', 'checkout', fastyaml['source']['git_rev']]
-                            subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-                        except(KeyError):
-                            pass
-                        os.chdir(cdir)
-                        script_dir = os.getcwd()
-                        os.chdir(build_dir)
-                        cmd = ['git', 'describe', '--tags', '--long']
-                        describe_output = subprocess.check_output(cmd).decode().split('-')
-                        os.chdir(script_dir)
-                        gd_tag = describe_output[0]
-                        gd_number = describe_output[1]
-                        gd_hash = describe_output[2]
-                        os.environ['GIT_DESCRIBE_TAG'] = gd_tag
-                        # Render the template again using the obtained git describe
-                        # variables.
-                        output = template.render(environment=env,
-                                GIT_DESCRIBE_TAG=gd_tag,
-                                GIT_DESCRIBE_NUMBER=gd_number,
-                                GIT_DESCRIBE_HASH=gd_hash)
-                        fastyaml = safe_load(output)
-                    except(KeyError):
-                        print('no source field in recipe: {}'.format(pkgname))
+                    fastyaml = self.render_template_from_source(rdir)
 
                 fast_canonical = '{}-{}-{}{}.tar.bz2'.format(
                     pkgname,
@@ -347,7 +376,6 @@ class MetaSet(object):
         '''Leave only the recipe metadata entries that appear in the
         provided manifest list active.'''
         for meta in self.metas:
-            print('--> {}'.format(meta.name))
             if meta.name not in self.manifest['packages']:
                 meta.active = False
 
@@ -386,6 +414,14 @@ class MetaSet(object):
         # sorting deterministic.
         self.metas = sorted(self.metas, key=lambda meta: meta.name)
         self.metas = sorted(self.metas, key=lambda meta: len(meta.peer_bdeps))
+
+    def filter_nonpy(self):
+        '''Deactivate all metadata objects that do not depend on python.
+        Used when employing manifests that build non-python packages across
+        multiple platforms. These packages only need to be built on a single
+        platform. This method allows for these packages to be selectively
+        removed from the build list.'''
+        print('Deactivating all metadata objects that depend upon python.')
 
     def index(self, mname):
         '''Return the index of a metadata object with the name 'mname'.'''
@@ -486,18 +522,15 @@ class MetaSet(object):
             if meta.canonical_name in self.channel_data['packages'].keys():
                 meta.archived = True
 
-    def print_details(self, fh=sys.stdout):
+    def print_details(self):
         num_notOK = 0
         print('conda-build version     : ', conda_build.__version__)
         print('Python version specified: ', self.versions['python'])
         print('Numpy  version specified: ', self.versions['numpy'])
-        print('                              num  num      peer', file=fh)
-        print('         name               bdeps  peer     bdep     pos.',
-              file=fh)
-        print('                                   bdeps    indices  OK?',
-              file=fh)
-        print('----------------------------------------------------------',
-              file=fh)
+        print('                              num  num      peer')
+        print('         name               bdeps  peer     bdep     pos.')
+        print('                                   bdeps    indices  OK?')
+        print('----------------------------------------------------------')
         for idx, m in enumerate(self.metas):
             if not self.position_OK(m.name):
                 num_notOK = num_notOK + 1
@@ -508,35 +541,43 @@ class MetaSet(object):
                           idx,
                           self.peer_bdep_indices(m.name),
                           self.position_OK(m.name),
-                          wid=2), file=fh)
+                          wid=2))
         print('Num not in order = {0}/{1}\n'.format(
             num_notOK,
-            len(self.metas)), file=fh)
+            len(self.metas)))
 
-    def print(self, fh=sys.stdout):
+    def print(self):
         '''Prints the list of package names in the order in which they appear
         in self.metas to stdout, suitable for ingestion by other tools during
         a build process.'''
         for m in self.metas:
-            print('{0}'.format(m.name), file=fh)
+            print('{0}'.format(m.name))
 
-    def print_culled(self, fh=sys.stdout):
+    def write(self, filename):
+        '''Writes the list of package names in the order in which they appear
+        in self.metas to stdout, suitable for ingestion by other tools during
+        a build process.'''
+        with open(filename,'w') as fh:
+            for m in self.metas:
+                fh.write('{0}\n'.format(m.name))
+
+    def print_culled(self):
         '''Prints the list of package names for which the canonical name does
         not exist in the specified archive channel. List is presented in the
         order in which entries appear in self.metas.'''
         for m in [m for m in self.metas if m.active and not m.archived]:
-            print('{0}'.format(m.name), file=fh)
+            print('{0}'.format(m.name))
 
-    def print_canonical(self, fh=sys.stdout):
+    def print_canonical(self):
         '''Prints list of canonical package names.'''
         for meta in self.metas:
-            print('{0:>50}'.format(meta.canonical_name), file=fh)
+            print('{0:>50}'.format(meta.canonical_name))
 
-    def print_status_in_channel(self, fh=sys.stdout):
+    def print_status_in_channel(self):
         '''Prints list of canonical package names and whether or not each
         has already been built and archived in the specified channel.'''
         statstr = {True: '', False: 'Not in channel archive'}
         for meta in self.metas:
             print('{0:>50}   {1}'.format(
                 meta.canonical_name,
-                statstr[meta.archived]), file=fh)
+                statstr[meta.archived]))
