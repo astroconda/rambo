@@ -257,9 +257,10 @@ class MetaSet(object):
                     GIT_DESCRIBE_TAG=gd_tag,
                     GIT_DESCRIBE_NUMBER=gd_number,
                     GIT_DESCRIBE_HASH=gd_hash)
-            return safe_load(output)
+            fastyaml = safe_load(output)
         except(KeyError):
             print('no source field in recipe: {}'.format(pkgname))
+        return fastyaml
 
     def read_recipe_selection(self, directory, recipe_list):
         '''Process a directory, reading in each conda recipe found, creating
@@ -301,14 +302,16 @@ class MetaSet(object):
                 except:
                     rundep_names = ''
                     # TODO INFO 
-                    print('"Incomplete" metadata. No run requirements.')
+                    print('"Incomplete" metadata for {}. No run requirements.'.format(
+                        rdirname))
 
                 try:
                      blddep_names = [x.split()[0] for x in
                              fastyaml['requirements']['build']]
                 except:
                     blddep_names = ''
-                    print('"Incomplete" metadata. No build requirements.')
+                    print('"Incomplete" metadata for {}. No build requirements.'.format(
+                        rdirname))
 
                 # If filter-nonpy specified, skip all recipes that have a python
                 # dependency.
