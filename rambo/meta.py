@@ -195,8 +195,6 @@ class MetaSet(object):
         self.incomplete_metas = []
         self.names = []
         self.read_recipes(directory)
-        if self.manfile:
-            self.filter_by_manifest()
         self.derive_values()
         self.sort_by_peer_bdeps()
         self.merge_metas()
@@ -271,28 +269,28 @@ class MetaSet(object):
                 continue
             rdir = directory + '/' + rdirname
 
-            # Default beavior is to quickly generate each package canonical name,
-            # check for the presence of that name in the channel archive, and
-            # skip rendering the recipe entirely if a package with that name
-            # already exists. This saves great deal of time compared to rendering
-            # every recipe to determine the canonical names.
+            # If culling was requested, quickly generate each package canonical
+            # name, check for the presence of that name in the channel archive,
+            # and skip rendering the recipe entirely if a package with that name
+            # already exists. This saves a great deal of time compared to
+            # rendering every recipe via conda-build to determine the canonical
+            # names.
             if self.culled:
-                # If requested, quickly pre-process templates here, and only
-                # instantiate (and render) metadata for recipes that have names
+                # If requested, only instantiate (and render) metadata for recipes that have names
                 # which do not appear in channel archive.
                 env = Environment(loader=FileSystemLoader(directory))
                 env.globals['environ'] = os.environ
 
-                # First pass (for -dev), only pass for -contrib
+                # First template rendering pass (for -dev), only pass for -contrib
                 template = env.get_template(rdirname+'/meta.yaml')
                 output = template.render(environment=env)
                 # BaseLoader here is required to interpret all values as strings
                 # to correctly handle things like version = '3.410` without
                 # dropping the trailing 0.
                 fastyaml = yaml.load(output, Loader=yaml.BaseLoader)
+
                 # Determine if a 'pyXX' build string is necessary in the package name
                 # by looking for 'python' in the run requirements.
-                # TODO: Check for build requirement too?
                 build_string = ''
                 rundep_names = []
                 blddep_names = []
@@ -301,7 +299,6 @@ class MetaSet(object):
                             fastyaml['requirements']['run']]
                 except:
                     rundep_names = ''
-                    # TODO INFO 
                     print('"Incomplete" metadata for {}. No run requirements.'.format(
                         rdirname))
 
@@ -326,10 +323,10 @@ class MetaSet(object):
 
                 pkgname = fastyaml['package']['name']
 
-                # Some recipes (mostly -dev) require extra steps to obtain the source for
-                # generating template replacement values. Handle this extra processing
-                # for all recipes that produced a 'dev' within the package name above.
+                # Development recipes require extra steps to obtain the source for
+                # generating template replacement values.
                 if re.search('\.dev', str(fastyaml['package']['version'])): 
+                    # Second template rendering pass for -dev recipe.
                     fastyaml = self.render_template_from_source(rdir)
 
                 fast_canonical = '{}-{}-{}{}.tar.bz2'.format(
@@ -374,13 +371,6 @@ class MetaSet(object):
         self.manifest = safe_load(mf)
         self.channel = self.manifest['channel_URL'].strip('/')
         self.channel += '/' + self.platform_arch
-
-    def filter_by_manifest(self):
-        '''Leave only the recipe metadata entries that appear in the
-        provided manifest list active.'''
-        for meta in self.metas:
-            if meta.name not in self.manifest['packages']:
-                meta.active = False
 
     def merge_metas(self):
         '''Prepend the list of metas that do not have complete build

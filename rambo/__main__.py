@@ -103,7 +103,12 @@ def main(argv=None):
 
     recipes_dir = os.path.normpath(args.recipes_dir)
 
-    versions = {'python': '', 'numpy': ''}
+    # If --python not specified, use version of current interpreter.
+    vinfo = sys.version_info
+    default_pyver = '{}.{}'.format(
+            vinfo.major,
+            vinfo.minor)
+    versions = {'python': default_pyver, 'numpy': ''}
     if args.python:
         versions['python'] = args.python
 
