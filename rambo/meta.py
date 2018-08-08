@@ -91,7 +91,14 @@ class Meta(object):
                     filename_hashing=False)  # enables --old-build-string
                 # conda-build v3.x render() returns a list of tuples:
                 #  [(MetaData, bool, bool)]
-                self.metaobj = self.render_payload[0][0]
+                if not self.render_payload:
+                    print('Skipping due to empty payload: Marking metadata as invalid')
+                    self.valid = False
+                else:
+                    self.metaobj = self.render_payload[0][0]
+
+            if not self.valid:
+                return
 
             self.mdata = self.metaobj.meta
             self.valid = self.is_valid()
@@ -148,11 +155,16 @@ class Meta(object):
                         numpy=self.versions['numpy'],
                         dirty=self.dirty)
         if CONDA_BUILD_MAJOR_VERSION == '3':
+            if self.metaobj is None:
+                print('Not rendering canonical name')
+                return
+
             output_file_path = conda_build.api.get_output_file_paths(
                         self.metaobj,
                         python=self.versions['python'],
                         numpy=self.versions['numpy'],
                         dirty=self.dirty)[0]
+
         self.canonical_name = os.path.basename(output_file_path)
         print('Package canonical name: {}\n\n'.format(
                 self.canonical_name))
@@ -345,12 +357,13 @@ class MetaSet(object):
                      versions=self.versions,
                      channel=self.channel,
                      dirty=self.dirty)
-            if not m.metaobj.skip():
-                if m.complete:
-                    self.metas.append(m)
-                    self.names.append(m.name)
-                else:
-                    self.incomplete_metas.append(m)
+            if m.valid:
+                if not m.metaobj.skip():
+                    if m.complete:
+                        self.metas.append(m)
+                        self.names.append(m.name)
+                    else:
+                        self.incomplete_metas.append(m)
 
     def read_recipes(self, directory):
         recipe_dirnames = os.listdir(directory)
