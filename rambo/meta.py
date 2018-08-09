@@ -93,12 +93,11 @@ class Meta(object):
                 #  [(MetaData, bool, bool)]
                 if not self.render_payload:
                     print('Skipping due to empty payload: Marking metadata as invalid')
-                    self.valid = False
                 else:
                     self.metaobj = self.render_payload[0][0]
 
-            if not self.valid:
-                return
+                if self.metaobj is None:
+                    return
 
             self.mdata = self.metaobj.meta
             self.valid = self.is_valid()
